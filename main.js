@@ -4,10 +4,15 @@ import VectorSource from 'ol/source/Vector.js';
 import { Map, View } from 'ol';
 import TileLayer from 'ol/layer/Tile';
 import { Icon } from 'ol/style.js';
-import { Circle, Fill, Stroke, Style, Text } from 'ol/style';
-import Overlay from 'ol/Overlay.js';
+import { Fill, Stroke, Style} from 'ol/style';
 import OSM from 'ol/source/OSM';
+
+//import { global } from './lib/map/global';
+import { filterRoomsByFloor } from './lib/map/fillterRoom';
+import {highlightFeature} from './lib/map/onClick/hightLight';
+
 import './style.css'
+import { toggleSidePanel } from './lib/map/onClick/sidePanel';
 /* const vectorLayer = new VectorLayer({
   source: new VectorSource({
     url: 'https://geoserver.ctu.edu.vn/geoserver/ctu/ows?service=WFS&version=1.0.0&request=GetFeature&typeName=ctu%3Acantho_university_units&maxFeatures=50&outputFormat=application%2Fjson',
@@ -19,10 +24,6 @@ import './style.css'
     'stroke-width' : 1.0,
   },
 }); */
-const sidePanel = document.getElementById('side-panel');
-const sidePanelContent = document.getElementById('side-panel-content');
-const closeBtn = document.getElementById('close-btn');
-
 const geojsonFeature = {
   "type": "FeatureCollection", "features": [
     {
@@ -32,8 +33,7 @@ const geojsonFeature = {
       "geometry": {
         "type": "Point",
         "coordinates": [
-          11774159.39,
-          1122409.36
+          11774144.287902,1122409.9996554
         ]
       },
       "properties": {
@@ -50,6 +50,13 @@ const vectorSource = new VectorSource({
     featureProjection: 'EPSG:3857' // Ensure the coordinates are in the correct projection
   }),
 });
+vectorSource.getFeatures().forEach(function(feature) {
+  const featureProps = feature.getProperties();
+  const featureType = featureProps.feature_type || 'unknown';  // Retrieve feature_type from GeoJSON properties
+  console.log(featureType);
+  feature.set('feature_type', featureType); // Manually set the `feature_type` property
+  console.log('Feature Type:', feature.get('feature_type'));
+});
 
 
 const anchors = new VectorLayer({
@@ -63,14 +70,12 @@ const anchors = new VectorLayer({
   })
 });
 
-
-
-let roomGEOJSON = new VectorSource({
+const roomGEOJSON = new VectorSource({
   url: 'http://127.0.0.1:8000/api/units',
   format: new GeoJSON(),
 });
 
-let room = new VectorLayer({
+const room = new VectorLayer({
   source: roomGEOJSON,
   style: new Style({
     fill: new Fill({
@@ -83,103 +88,54 @@ let room = new VectorLayer({
   })
 });
 
-const map = new Map({
-  layers: [
-    new TileLayer({
-      source: new OSM(),
-    }),
-    room,
-    anchors,
-  ],
-  target: 'map',
-  view: new View({
-    center: [11774159.39, 1122409.36],
-    zoom: 20,
-  }),
-});
 
-//side panel
-closeBtn.onclick = function () {
-  sidePanel.style.left = '-300px'; // Hide the side panel
+
+
+export const global = {
+  selectedFeature: null,
+
+  room : room,
+
+  map : new Map({
+    layers: [
+      new TileLayer({
+        source: new OSM(),
+      }),
+      room,
+      anchors,
+    ],
+    target: 'map',
+    view: new View({
+      center: [11774159.39, 1122409.36],
+      zoom: 20,
+    }),
+  }),
+
+
 };
 
-map.on('click', function (evt) {
-  map.forEachFeatureAtPixel(evt.pixel, function (feature, layer) {
-    if (layer === room || layer === anchors) {
+export const Panel = {
+  sidePanel : document.getElementById('side-panel'),
+  sidePanelContent : document.getElementById('side-panel-content'),
+  closeBtn : document.getElementById('close-btn')
+};
+const floorSelector = document.getElementById('floor-select');
 
 
-      if (feature) {
-        var panelContent;
-        console.log(feature);
-        if (String(feature.getGeometry().getType()) === "Point") {
-          console.log("thid work");
-          panelContent = '1';
-        }
-        else if (String(feature.getGeometry().getType()) === "Polygon") {
-          panelContent = '<h3>' + feature.get('name').vi + '</h3>';
-          panelContent += '<p>Category: ' + feature.get('category') + '</p>';
-          panelContent += '<p>Level ID: ' + feature.get('level_id') + '</p>';
-          panelContent += '<p>Geometry Type: ' + feature.getGeometry().getType() + '</p>';
-          panelContent += '<p>Coordinates: ' + JSON.stringify(feature.getGeometry().getCoordinates()) + '</p>';
-        }
+//side panel close button
+Panel.closeBtn.onclick = function () {
+  Panel.sidePanel.style.left = '-300px';
+};
 
-        sidePanelContent.innerHTML = panelContent;
-        sidePanel.style.left = '0px';
-      } else {
-        sidePanel.style.left = '-300px';
-      }
-    }
-  });
-});
-
-
-//click highlight
-let highlightStyle = new Style({
-  stroke: new Stroke({
-    color: 'gray',
-    width: 5,
-  }),
-  fill: new Fill({
-    color: 'rgba(255, 255, 0, 0.5)',
-  }),
-});
-
-let selectedFeature = null;
-map.on('click', function (evt) {
-  if (selectedFeature) {
-    selectedFeature.setStyle(undefined);
-    selectedFeature = null;
-  }
-
-  map.forEachFeatureAtPixel(evt.pixel, function (feature) {
-    if (String(feature.getGeometry().getType()) === "Polygon") {
-      selectedFeature = feature;
-      feature.setStyle(highlightStyle);
-    }
-    return true;
-  });
-
+//click events
+global.map.on('click', function (evt) {
+  highlightFeature(evt);
+  toggleSidePanel(evt, anchors);
 });
 
 //floor change
-function filterRoomsByFloor(floor) {
-  let filteredRooms = [];
-
-  roomGEOJSON.forEachFeature(function (feature) {
-    if (String(feature.get('level_id')) === String(floor)) {
-      filteredRooms.push(feature);
-    }
-  });
-
-  let filteredSource = new VectorSource({
-    features: filteredRooms
-  });
-
-  room.setSource(filteredSource);
-}
-
-document.getElementById('floor-select').addEventListener('change', function (event) {
-  let selectedFloor = String(event.target.value);
-  filterRoomsByFloor(selectedFloor);
+floorSelector.addEventListener('change', function (event) {
+  const selectedFloor = String(event.target.value);
+  filterRoomsByFloor(selectedFloor, roomGEOJSON);
 });
 
